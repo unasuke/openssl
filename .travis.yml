@@ -29,10 +29,11 @@ matrix:
     - language: ruby
       rvm: ruby-head
       before_install:
-        - "rake install_dependencies"
+        - gem install bundler
+        - rake install_dependencies
       script:
-        - "rake compile -- --enable-debug"
-        - "rake test"
+        - rake compile -- --enable-debug
+        - rake test
   allow_failures:
     - language: ruby
       rvm: ruby-head

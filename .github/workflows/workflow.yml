@@ -49,10 +49,14 @@ jobs:
         mingw: openssl
 
     - name: depends
-      run:  rake install_dependencies
+      run: |
+        gem install bundler
+        rake install_dependencies
     - name: compile
-      run:  rake compile -- --enable-debug
+      run: |
+        rake compile -- --enable-debug
     - name: test
-      run:  rake test TESTOPTS="-v --no-show-detail-immediately" OSSL_MDEBUG=1
+      run: |
+        rake test TESTOPTS="-v --no-show-detail-immediately" OSSL_MDEBUG=1
       env:
         CI: true
