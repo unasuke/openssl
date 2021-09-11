@@ -8,6 +8,7 @@
  * (See the file 'LICENCE'.)
  */
 #include "ossl.h"
+#include <ruby/ractor.h>
 
 #define NewCipher(klass) \
     TypedData_Wrap_Struct((klass), &ossl_cipher_type, 0)
@@ -1043,6 +1044,10 @@ Init_ossl_cipher(void)
      */
     cCipher = rb_define_class_under(mOSSL, "Cipher", rb_cObject);
     eCipherError = rb_define_class_under(cCipher, "CipherError", eOSSLError);
+
+#if HAVE_RB_EXT_RACTOR_SAFE
+    rb_ext_ractor_safe(true);
+#endif
 
     rb_define_alloc_func(cCipher, ossl_cipher_alloc);
     rb_define_method(cCipher, "initialize_copy", ossl_cipher_copy, 1);
