@@ -11,6 +11,8 @@ rescue LoadError
 end
 
 Rake::TestTask.new do |t|
+  # t.libs << 'test/lib' << "test"
+  # t.ruby_opts << "-rhelper"
   t.libs << 'test/openssl'
   t.test_files = FileList["test/**/test_*.rb"]
   t.warning = true

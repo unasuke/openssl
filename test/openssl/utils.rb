@@ -32,7 +32,10 @@ end
 require "test/unit"
 require "tempfile"
 require "socket"
-require "envutil"
+# require "envutil"
+require_relative "core_assertions"
+
+Test::Unit::TestCase.include Test::Unit::CoreAssertions
 
 if defined?(OpenSSL)
 
