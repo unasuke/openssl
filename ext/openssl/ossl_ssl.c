@@ -1686,7 +1686,7 @@ ossl_ssl_setup(VALUE self)
     // int sock = -1;
     // BIO_ADDRINFO *res;
     // const BIO_ADDRINFO *ai = NULL;
-    BIO *bio;
+    // BIO *bio;
     // const char *hostname = "localhost";
     // const char *port = "6121";
 
@@ -1708,7 +1708,9 @@ ossl_ssl_setup(VALUE self)
     // }
     // BIO_ADDRINFO_free(res);
     // BIO_set_fd(bio, sock, BIO_CLOSE);
-    bio = BIO_new(BIO_s_datagram());
+    // TODO: bio bio bio
+    // TODO: bio bio bio
+    // bio = BIO_new(BIO_s_datagram());
 
     GetSSL(self, ssl);
     if (ssl_started(ssl))
@@ -1716,14 +1718,14 @@ ossl_ssl_setup(VALUE self)
 
     io = rb_attr_get(self, id_i_io);
     GetOpenFile(io, fptr);
-    BIO_set_fd(bio, fptr->fd, BIO_NOCLOSE);
+    // BIO_set_fd(bio, fptr->fd, BIO_NOCLOSE);
     rb_io_check_readable(fptr);
     rb_io_check_writable(fptr);
     // if (!SSL_set_fd(ssl, TO_SOCKET(rb_io_descriptor(io)))) {
     //     printf("$$$$$$$$$$$$$ koko de ochiru???? $$$$$$$$$$$$$$$$$$$$$");
     //     ossl_raise(eSSLError, "SSL_set_fd");
     // }
-    SSL_set_bio(ssl, bio, bio);
+    // SSL_set_bio(ssl, bio, bio);
     printf("return Qtrue from ossl_ssl_setup\n");
     return Qtrue;
 }
@@ -1805,17 +1807,44 @@ ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
     int ret, ret2;
     VALUE cb_state;
     int nonblock = opts != Qfalse;
-    unsigned char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    unsigned char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '0' };
     const char *request_start = "GET / HTTP/1.0\r\nConenction: close\r\nHost: ";
     const char *request_end = "\r\n\r\n";
     size_t weitten, readbytes;
     char buf[160];
     const char *hostname = "localhost";
     BIO_ADDR *peer_addr = NULL;
+    int sock = -1;
+    BIO_ADDRINFO *res;
+    const BIO_ADDRINFO *ai = NULL;
+    BIO *bio;
+    // const char *hostname = "localhost";
+    const char *port = "6121";
+
+    if(!BIO_lookup_ex(hostname, port, BIO_LOOKUP_CLIENT, AF_INET, SOCK_DGRAM, 0, &res)) { ossl_raise(eSSLError, "BIO_lookup_ex"); }
+    for(ai = res; ai != NULL; ai = BIO_ADDRINFO_next(ai)) {
+        sock = BIO_socket(BIO_ADDRINFO_family(ai), SOCK_DGRAM, 0, 0);
+        if(sock == -1) { continue; }
+        if(!BIO_connect(sock, BIO_ADDRINFO_address(ai), 0)) {
+            BIO_closesocket(sock);
+            sock = -1;
+            continue;
+        }
+        if(!BIO_socket_nbio(sock, 1)) {
+            BIO_closesocket(sock);
+            sock = -1;
+            continue;
+        }
+        break;
+    }
+    BIO_ADDRINFO_free(res);
+    bio = BIO_new(BIO_s_datagram());
+    BIO_set_fd(bio, sock, BIO_CLOSE);
 
     rb_ivar_set(self, ID_callback_state, Qnil);
 
     GetSSL(self, ssl);
+    SSL_set_bio(ssl, bio, bio);
     if(!SSL_set_tlsext_host_name(ssl, hostname)) {
         ossl_raise(eSSLError, "SSL_set_tlsext_host_name");
     }
@@ -1830,8 +1859,14 @@ ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
 
 
     VALUE io = rb_attr_get(self, id_i_io);
+    fprintf(stdout, "## let's connect\n");
+    ret = SSL_connect(ssl);
+    OSSL_sleep(1500);
+    fprintf(stdout, "## connected?\n");
+    ERR_print_errors_fp(stderr);
+    ERR_clear_error();
     for (;;) {
-        ret = func(ssl);
+        // ret = func(ssl);
         printf("immediately after of SSL_connect\n", ret);
         ERR_print_errors_fp(stderr);
         ERR_clear_error();
