@@ -10,6 +10,7 @@
  * (See the file 'LICENCE'.)
  */
 #include "ossl.h"
+#include <sys/socket.h>
 
 #ifndef OPENSSL_NO_SOCK
 #define numberof(ary) (int)(sizeof(ary)/sizeof((ary)[0]))
@@ -92,7 +93,9 @@ ossl_sslctx_s_alloc(VALUE klass)
 
     obj = TypedData_Wrap_Struct(klass, &ossl_sslctx_type, 0);
 #if OPENSSL_VERSION_NUMBER >= 0x10100000 || defined(LIBRESSL_VERSION_NUMBER)
-    ctx = SSL_CTX_new(TLS_method());
+    // ctx = SSL_CTX_new_ex(NULL, NULL, TLS_method()); // TODO SSLContext.new
+    // ctx = SSL_CTX_new(TLS_method());
+    ctx = SSL_CTX_new(OSSL_QUIC_client_method());
 #else
     ctx = SSL_CTX_new(SSLv23_method());
 #endif
@@ -1622,9 +1625,11 @@ peeraddr_ip_str(VALUE self)
 static VALUE
 ossl_ssl_initialize(int argc, VALUE *argv, VALUE self)
 {
+    printf("hello from SSLSocket.new\n");
     VALUE io, v_ctx, verify_cb;
     SSL *ssl;
     SSL_CTX *ctx;
+
 
     TypedData_Get_Struct(self, SSL, &ossl_ssl_type, ssl);
     if (ssl)
@@ -1673,9 +1678,37 @@ io_descriptor_fallback(VALUE io)
 static VALUE
 ossl_ssl_setup(VALUE self)
 {
+    printf("hello from ossl_ssl_setup\n");
     VALUE io;
     SSL *ssl;
     rb_io_t *fptr;
+
+    // int sock = -1;
+    // BIO_ADDRINFO *res;
+    // const BIO_ADDRINFO *ai = NULL;
+    BIO *bio;
+    // const char *hostname = "localhost";
+    // const char *port = "6121";
+
+    // if(!BIO_lookup_ex(hostname, port, BIO_LOOKUP_CLIENT, AF_INET, SOCK_DGRAM, 0, &res)) { ossl_raise(eSSLError, "BIO_lookup_ex"); }
+    // for(ai = res; ai != NULL; ai = BIO_ADDRINFO_next(ai)) {
+    //     sock = BIO_socket(BIO_ADDRINFO_family(ai), SOCK_DGRAM, 0, 0);
+    //     if(sock == -1) { continue; }
+    //     if(!BIO_connect(sock, BIO_ADDRINFO_address(ai), 0)) {
+    //         BIO_closesocket(sock);
+    //         sock = -1;
+    //         continue;
+    //     }
+    //     if(!BIO_socket_nbio(sock, 1)) {
+    //         BIO_closesocket(sock);
+    //         sock = -1;
+    //         continue;
+    //     }
+    //     break;
+    // }
+    // BIO_ADDRINFO_free(res);
+    // BIO_set_fd(bio, sock, BIO_CLOSE);
+    bio = BIO_new(BIO_s_datagram());
 
     GetSSL(self, ssl);
     if (ssl_started(ssl))
@@ -1683,11 +1716,15 @@ ossl_ssl_setup(VALUE self)
 
     io = rb_attr_get(self, id_i_io);
     GetOpenFile(io, fptr);
+    BIO_set_fd(bio, fptr->fd, BIO_NOCLOSE);
     rb_io_check_readable(fptr);
     rb_io_check_writable(fptr);
-    if (!SSL_set_fd(ssl, TO_SOCKET(rb_io_descriptor(io))))
-        ossl_raise(eSSLError, "SSL_set_fd");
-
+    // if (!SSL_set_fd(ssl, TO_SOCKET(rb_io_descriptor(io)))) {
+    //     printf("$$$$$$$$$$$$$ koko de ochiru???? $$$$$$$$$$$$$$$$$$$$$");
+    //     ossl_raise(eSSLError, "SSL_set_fd");
+    // }
+    SSL_set_bio(ssl, bio, bio);
+    printf("return Qtrue from ossl_ssl_setup\n");
     return Qtrue;
 }
 
@@ -1763,18 +1800,51 @@ io_wait_readable(VALUE io)
 static VALUE
 ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
 {
+    printf("hello from ossl_start_ssl\n");
     SSL *ssl;
     int ret, ret2;
     VALUE cb_state;
     int nonblock = opts != Qfalse;
+    unsigned char alpn[] = { 8, 'h', 't', 't', 'p', '/', '1', '.', '1' };
+    const char *request_start = "GET / HTTP/1.0\r\nConenction: close\r\nHost: ";
+    const char *request_end = "\r\n\r\n";
+    size_t weitten, readbytes;
+    char buf[160];
+    const char *hostname = "localhost";
+    BIO_ADDR *peer_addr = NULL;
 
     rb_ivar_set(self, ID_callback_state, Qnil);
 
     GetSSL(self, ssl);
+    if(!SSL_set_tlsext_host_name(ssl, hostname)) {
+        ossl_raise(eSSLError, "SSL_set_tlsext_host_name");
+    }
+    if(!SSL_set1_host(ssl, hostname)) {
+        ossl_raise(eSSLError, "SSL_set1_host");
+    }
+    SSL_set_alpn_protos(ssl, alpn, sizeof(alpn));
+    if(!SSL_set1_initial_peer_addr(ssl, peer_addr)) {
+        ossl_raise(eSSLError, "SSL_set1_initial_peer_addr");
+    }
+    // OSSL_sleep(3000);
+
 
     VALUE io = rb_attr_get(self, id_i_io);
     for (;;) {
         ret = func(ssl);
+        printf("immediately after of SSL_connect\n", ret);
+        ERR_print_errors_fp(stderr);
+        ERR_clear_error();
+        if(ret < 1) {
+            printf("failed to connect to the server\n");
+            if(SSL_get_verify_result(ssl) != X509_V_OK) {
+                printf("Verify error: %s\n", X509_verify_cert_error_string(SSL_get_verify_result(ssl)));
+        ERR_print_errors_fp(stderr);
+                ossl_raise(eSSLError, "SSL_connect verify failed");
+            }
+        }
+        OSSL_sleep(1000);
+        printf("ret = %d\n", ret);
 
         cb_state = rb_attr_get(self, ID_callback_state);
         if (!NIL_P(cb_state)) {
@@ -1783,16 +1853,36 @@ ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
             rb_jump_tag(NUM2INT(cb_state));
         }
 
-        if (ret > 0)
+        if (ret > 0) {
+            printf("ret >0, so return here\n");
             break;
+        }
+        printf("==========before_sleep\n");
+        OSSL_sleep(3000);
+
+        // if(!SSL_write_ex(ssl, request_start, strlen(request_start), &weitten)) {
+        //     ossl_raise(eSSLError, "SSL_write_ex");
+        // }
+        // if(!SSL_write_ex(ssl, hostname, strlen(hostname), &weitten)) {
+        //     ossl_raise(eSSLError, "Failed to write hostname in HTTP request");
+        // }
+        // if(!SSL_write_ex(ssl, request_end, strlen(request_end), &weitten)) {
+        //     ossl_raise(eSSLError, "Failed to write end of HTTP request");
+        // }
+        // while (SSL_read_ex(ssl, buf, sizeof(buf), &readbytes)) {
+        //     printf("%s", buf);
+        // }
+        // printf("\n");
 
         switch ((ret2 = ssl_get_error(ssl, ret))) {
           case SSL_ERROR_WANT_WRITE:
+            printf("ret2 = %d SSL_ERROR_WANT_WRITE\n", ret2);
             if (no_exception_p(opts)) { return sym_wait_writable; }
             write_would_block(nonblock);
             io_wait_writable(io);
             continue;
           case SSL_ERROR_WANT_READ:
+            printf("ret2 = %d SSL_ERROR_WANT_READ\n", ret2);
             if (no_exception_p(opts)) { return sym_wait_readable; }
             read_would_block(nonblock);
             io_wait_readable(io);
@@ -1806,6 +1896,7 @@ ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
             if (errno) rb_sys_fail(funcname);
             /* fallthrough */
           default: {
+              printf("ret2 = %d default\n", ret2);
               VALUE error_append = Qnil;
 #if defined(SSL_R_CERTIFICATE_VERIFY_FAILED)
               unsigned long err = ERR_peek_last_error();
@@ -1821,6 +1912,8 @@ ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
                   error_append = rb_sprintf(": %s (%s)", err_msg, verify_msg);
               }
 #endif
+              printf("TABUN KOKO %s\n", funcname);
+              ERR_print_errors_fp(stderr);
               ossl_raise(eSSLError,
                          "%s%s returned=%d errno=%d peeraddr=%"PRIsVALUE" state=%s%"PRIsVALUE,
                          funcname,
@@ -1830,10 +1923,12 @@ ossl_start_ssl(VALUE self, int (*func)(SSL *), const char *funcname, VALUE opts)
                          peeraddr_ip_str(self),
                          SSL_state_string_long(ssl),
                          error_append);
+              printf("MODORANAI\n");
           }
         }
     }
 
+    printf("return self from ossl_start_ssl\n");
     return self;
 }
 
@@ -2973,7 +3068,7 @@ Init_ossl_ssl(void)
      */
     cSSLSocket = rb_define_class_under(mSSL, "SSLSocket", rb_cObject);
     rb_define_alloc_func(cSSLSocket, ossl_ssl_s_alloc);
-    rb_define_method(cSSLSocket, "initialize", ossl_ssl_initialize, -1);
+    rb_define_method(cSSLSocket, "initialize", ossl_ssl_initialize, -1); // TODO: SSLSocket.new
     rb_undef_method(cSSLSocket, "initialize_copy");
     rb_define_method(cSSLSocket, "connect",    ossl_ssl_connect, 0);
     rb_define_method(cSSLSocket, "connect_nonblock",    ossl_ssl_connect_nonblock, -1);

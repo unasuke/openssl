@@ -23,6 +23,7 @@
 #include <openssl/asn1.h>
 #include <openssl/x509v3.h>
 #include <openssl/ssl.h>
+#include <openssl/quic.h>
 #include <openssl/pkcs12.h>
 #include <openssl/pkcs7.h>
 #include <openssl/rand.h>
