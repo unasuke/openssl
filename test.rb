@@ -23,6 +23,7 @@ pp "ssl connect done"
 # ssl.post_connection_check('www.example.com')
 # # raise "verification error" if ssl.verify_result != OpenSSL::X509::V_OK
 # # ssl.write('hoge')
-print ssl.peer_cert.to_text
+# print ssl.peer_cert.to_text
+ssl.syswrite("GET / HTTP/1.0\r\nConnection: close\r\nHost: localhost\r\n\r\n")
 ssl.close
 soc.close
